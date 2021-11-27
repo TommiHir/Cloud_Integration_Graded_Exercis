@@ -11,21 +11,18 @@ const flash = require('express-flash');
 const session = require('express-session');
 const methodOverride = require('method-override');
 
-// Create connection to MySql
-const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    database: 'nodemysql'
-});
 
-// Connect to database
-db.connect((err) => {
-    if(err) {
-        console.log(err);
-    } else {
-        console.log('Mysql connected')
-    }
-});
+const {  Client, Connection } = require('pg')
+
+const client = new Client({
+  user: 'postgres',
+  host: 'localhost',
+  database: 'taskdb',
+  password: 'root',
+  port: 5432,
+})
+client.connect()
+
 
 app.get('/createpoststable', (req, res) => {
     let sql = 'CREATE TABLE posts(id int AUTO_INCREMENT, titale VARCHAR(255), description VARCHAR(255), PRIMARY KEY(id))';
@@ -52,40 +49,39 @@ app.get('/addpost1', (req, res) => {
 })
 
 const initializePassport = require('./passport-config')
-const { Server } = require('http')
+const { Server } = require('http');
+const { name } = require('ejs');
 
-function checkIfUserEmailEx(email){
-    let sql = `SELECT * FROM users WHERE email='${email}'`
-    console.log('checkIfUsersEmailEx......');
-    var user = db.query(sql, (err, result) => {
-        if(err) {
-            console.log(err);
-        } else {
-            return result[0];
-        }    
-    })
-
-    console.log('user='+user);
-    return user;
+async function getUserWithEmail(email){
+    var user = await client.query("SELECT * FROM users WHERE email=$1", [email]);
+    console.log('user= ' + user)
+    JSON.stringify(user)
+    var parseuser = {
+        id: user.rows[0].id,
+        name: user.rows[0].name,
+        email: user.rows[0].email,
+        password: user.rows[0].password
+    }
+    console.log(parseuser[1])
+    return parseuser;
 }
 
-function getUserWithId(id){
-    let sql = `SELECT * FROM users WHERE id='${id}'`
-    console.log('getUserWithID......');
-    var user = db.query(sql, (err, result) => {
-        if(err) {
-            console.log(err);
-        } else {
-            return result[0];
-        }    
-    })
-    console.log('user='+user);
-    return user;
+async function getUserWithId(id){
+    var user = await client.query("SELECT * FROM users WHERE id=$1", [id]);
+    JSON.stringify(user)
+    var parseuser = {
+        id: user.rows[0].id,
+        name: user.rows[0].name,
+        email: user.rows[0].email,
+        password: user.rows[0].password
+    }
+
+    return parseuser;
 }
 
 initializePassport(
     passport,
-    checkIfUserEmailEx,
+    getUserWithEmail,
     getUserWithId
 )
 
@@ -146,15 +142,13 @@ app.post('/register', checNotAuthenticated, async (req, res) => {
         email: req.body.email,
         password: hashedPassword
     }
-    let sql = 'INSERT INTO users SET ?';
-    db.query(sql, users, (err, result) => {
-        if(err) {
-             console.log(err);
-        }
-        console.log(result);
-        res.redirect('/');
+    client.query('INSERT INTO users (name, email, password) VALUES ($1, $2, $3)', [req.body.name, req.body.email, hashedPassword])
+    .then((result) => {
+        res.redirect('/login');
     })
-    console.log(users)
+    .catch((error) => {
+        console.log('Error: ' + error)
+    })
 })
 
 app.post('/postnew', (req, res) => {
