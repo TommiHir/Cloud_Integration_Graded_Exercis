@@ -1,1 +1,16 @@
-<h1>ASD <%= name %></h1>
+<h1>Hi<%= name %>!</h1>
+<div>Welcome to shop online</div>
+<div>choose what you want to do:</div>
+<form action="/postnew">
+    <button type="submit">Post new</button>
+</form>
+<form action="/checkpost">
+    <button type="submit">check post</button>
+</form>
+<form action="/modify">
+    <button type="submit">modify post</button>
+</form>
+
+<form action="/logout?_method=DELETE" method="post">
+    <button type="submit">Log Out</button>
+</form>
