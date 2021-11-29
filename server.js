@@ -29,6 +29,7 @@ client.connect()
 const initializePassport = require('./passport-config')
 const { Server } = require('http');
 const { name } = require('ejs');
+const exp = require('constants');
 
 async function getUserWithEmail(email){
     var user = await client.query("SELECT * FROM users WHERE email=$1", [email]);
@@ -55,12 +56,14 @@ async function getUserWithId(id){
     return parseuser;
 }
 
+
+// Passport function call
 initializePassport(
     passport,
     getUserWithEmail,
     getUserWithId
 )
-
+app.use(express.static(__dirname + '/views'));
 app.set('view-engine', 'ejs')
 app.use(express.urlencoded({ extended: false }))
 app.use(flash())
@@ -74,8 +77,17 @@ app.use(passport.initialize())
 app.use(passport.session())
 app.use(methodOverride('_method'))
 
+// Render routes
 app.get('/', (req, res) => {
-    res.render('index.ejs')
+    var user = req.user
+    if(user) {
+        user.then(async function (result) {
+            res.render('index.ejs', { user: result })
+
+        })
+    } else {
+        res.render('index.ejs', { user: false })
+    }
 })
 
 app.get('/login', checNotAuthenticated, (req, res) => {
@@ -85,6 +97,51 @@ app.get('/login', checNotAuthenticated, (req, res) => {
 app.get('/register',checNotAuthenticated, (req, res) => {
     res.render('register.ejs')
 })
+
+app.get('/postnew', checkAuthenticated, (req, res) => {
+    res.render('postnew.ejs')
+})
+
+app.get('/modifypost', (req,res) => {
+    res.render('modifypost.ejs')
+})
+
+app.post('/postnew', (req, res) => {
+    if(loggedIn) {
+        res.redirect('/postnew')
+    } else res.redirect('/login') 
+})
+
+// Login route functionality
+
+app.post('/login', checNotAuthenticated, passport.authenticate('local', {
+    successRedirect: '/',
+    failureRedirect: '/login',
+    failureFlash: true
+}))
+
+function checkAuthenticated(req, res, next) {
+    if (req.isAuthenticated()) {
+        return next()
+    }
+    res.redirect('/login')
+}
+
+// Register route functionality
+
+app.post('/register', checNotAuthenticated, async (req, res) => {
+
+    const hashedPassword = await bcrypt.hash(req.body.password, 8)
+    client.query('INSERT INTO users (name, email, password) VALUES ($1, $2, $3)', [req.body.name, req.body.email, hashedPassword])
+    .then((result) => {
+        res.redirect('/login');
+    })
+    .catch((error) => {
+        console.log('Error: ' + error)
+    })
+})
+
+// Checkpost functionality
 
 app.get('/checkpost', async (req, res) => {
     var post = await client.query("SELECT * FROM posts");
@@ -105,9 +162,7 @@ app.get('/checkpost', async (req, res) => {
 
 })
 
-app.get('/postnew', checkAuthenticated, (req, res) => {
-    res.render('postnew.ejs')
-})
+// My posts functionality
 
 app.get('/myposts', checkAuthenticated, (req, res) => {
     var userId = req.user
@@ -130,12 +185,21 @@ app.get('/myposts', checkAuthenticated, (req, res) => {
     })
 })
 
-app.get('/deletepost/:id', checkAuthenticated, (req, res) => {
+app.get('/modifymypost/:id', checkAuthenticated, async (req, res) => {
+    console.log(req.params.id)
+    var post = await client.query('SELECT * FROM posts WHERE id=$1', [req.params.id]);
+    console.log(req.params.id)
+    res.redirect('/modifypost', { post: post.rows[0] })
+})
+
+// Delete post by user_id
+app.delete('/deletepost/:id', checkAuthenticated, (req, res) => {
     console.log(req.params.id)
     client.query('DELETE FROM posts WHERE id=$1', [req.params.id]);
     res.redirect('/myposts');
 })
 
+//Make new post functionality
 app.post('/makenewpost', checkAuthenticated, (req, res) => {
     console.log(req.user)
     var userId = req.user
@@ -153,43 +217,14 @@ app.post('/makenewpost', checkAuthenticated, (req, res) => {
     })
 })
 
-app.post('/login', checNotAuthenticated, passport.authenticate('local', {
-    successRedirect: '/',
-    failureRedirect: '/login',
-    failureFlash: true
-}))
-
-app.post('/register', checNotAuthenticated, async (req, res) => {
-
-    const hashedPassword = await bcrypt.hash(req.body.password, 8)
-    client.query('INSERT INTO users (name, email, password) VALUES ($1, $2, $3)', [req.body.name, req.body.email, hashedPassword])
-    .then((result) => {
-        res.redirect('/login');
-    })
-    .catch((error) => {
-        console.log('Error: ' + error)
-    })
-})
-
-app.post('/postnew', (req, res) => {
-    if(loggedIn) {
-        res.redirect('/postnew')
-    } else res.redirect('/login') 
-})
-
-function checkAuthenticated(req, res, next) {
-    if (req.isAuthenticated()) {
-        return next()
-    }
-    res.redirect('/login')
-}
-
+//Log out functionality
 app.delete('/logout', (req, res) => {
     loggedIn = false;
     req.logOut()
     res.redirect('/login')
 }) 
 
+// Authentication check
 function checNotAuthenticated(req, res, next) {
     if (req.isAuthenticated()){
        return res.redirect('/')
