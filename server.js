@@ -2,6 +2,8 @@ if (process.env.NODE_ENV !== 'production') {
      require('dotenv').config()
 }
 
+//const postsList = document.getElementById('postsList');
+
 const express = require('express');
 const app = express();
 const bcrypt = require('bcrypt');
@@ -11,6 +13,7 @@ const flash = require('express-flash');
 const session = require('express-session');
 const methodOverride = require('method-override');
 
+var today = new Date();
 
 const {  Client, Connection } = require('pg')
 
@@ -23,38 +26,12 @@ const client = new Client({
 })
 client.connect()
 
-
-app.get('/createpoststable', (req, res) => {
-    let sql = 'CREATE TABLE posts(id int AUTO_INCREMENT, titale VARCHAR(255), description VARCHAR(255), PRIMARY KEY(id))';
-    db.query(sql, (err, result) => {
-        if(err) {
-            console.log(err);
-       }
-        console.log(result);
-        res.send('posts table created');
-    });
-});
-
-// Insert post 1
-app.get('/addpost1', (req, res) => {
-    let post= {titale: 'Post one', description: 'This is 1st post'};
-    let sql = 'INSERT INTO posts SET ?';
-    let query = db.query(sql, post, (err, result) => {
-        if(err) {
-            console.log(err);
-        }
-        console.log(result);
-        res.send('Post created');
-    })
-})
-
 const initializePassport = require('./passport-config')
 const { Server } = require('http');
 const { name } = require('ejs');
 
 async function getUserWithEmail(email){
     var user = await client.query("SELECT * FROM users WHERE email=$1", [email]);
-    console.log('user= ' + user)
     JSON.stringify(user)
     var parseuser = {
         id: user.rows[0].id,
@@ -62,7 +39,6 @@ async function getUserWithEmail(email){
         email: user.rows[0].email,
         password: user.rows[0].password
     }
-    console.log(parseuser[1])
     return parseuser;
 }
 
@@ -85,12 +61,6 @@ initializePassport(
     getUserWithId
 )
 
-// initializePassport(
-//     passport,
-//     email => users.find(user => user.email == email),
-//     id => users.find(user => user.id == id)
-// )
-
 app.set('view-engine', 'ejs')
 app.use(express.urlencoded({ extended: false }))
 app.use(flash())
@@ -104,8 +74,8 @@ app.use(passport.initialize())
 app.use(passport.session())
 app.use(methodOverride('_method'))
 
-app.get('/', checkAuthenticated, (req, res) => {
-    res.render('index.ejs', { name: req.user.name})
+app.get('/', (req, res) => {
+    res.render('index.ejs')
 })
 
 app.get('/login', checNotAuthenticated, (req, res) => {
@@ -116,16 +86,71 @@ app.get('/register',checNotAuthenticated, (req, res) => {
     res.render('register.ejs')
 })
 
-app.get('/checkpost', (req, res) => {
-    res.render('checkpost.ejs')
+app.get('/checkpost', async (req, res) => {
+    var post = await client.query("SELECT * FROM posts");
+    var asd = JSON.stringify(post)
+    for(i = 0; i < post.rows.length; i++) {
+        if(post.rows[i].category!=null) {
+            var parsedcategory = post.rows[i].category.split(',');
+            parsedcategory = parsedcategory.map((item) => {
+                item = item.replace('{', '');
+                item = item.replace('}', '');
+                item = item.replaceAll('"', '');
+                return item;
+            })
+            post.rows[i].category = parsedcategory
+        }
+    } 
+    res.render('checkpost.ejs', { posts: post.rows });
+
 })
 
-app.get('/postnew', (req, res) => {
+app.get('/postnew', checkAuthenticated, (req, res) => {
     res.render('postnew.ejs')
 })
 
-app.get('/modify', (req, res) => {
-    res.render('modify.ejs')
+app.get('/myposts', checkAuthenticated, (req, res) => {
+    var userId = req.user
+    userId.then(async function (result) {
+        userId = parseInt(result.id)
+    var post = await client.query("SELECT * FROM posts WHERE user_id=$1", [userId]);
+    for(i = 0; i < post.rows.length; i++) {
+        if(post.rows[i].category!=null) {
+            var parsedcategory = post.rows[i].category.split(',');
+            parsedcategory = parsedcategory.map((item) => {
+                item = item.replace('{', '');
+                item = item.replace('}', '');
+                item = item.replaceAll('"', '');
+                return item;
+            })
+            post.rows[i].category = parsedcategory
+        }
+    }     
+    res.render('myposts.ejs', { posts: post.rows });
+    })
+})
+
+app.get('/deletepost/:id', checkAuthenticated, (req, res) => {
+    console.log(req.params.id)
+    client.query('DELETE FROM posts WHERE id=$1', [req.params.id]);
+    res.redirect('/myposts');
+})
+
+app.post('/makenewpost', checkAuthenticated, (req, res) => {
+    console.log(req.user)
+    var userId = req.user
+    userId.then(function (result) {
+        userId = parseInt(result.id)
+        var date = today.getFullYear()+'-'+(today.getMonth()+1)+'-'+today.getDate();
+        client.query('INSERT INTO posts (title, description, location, price, delivery, date, category, user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', 
+        [ req.body.title, req.body.description, req.body.location, req.body.price, req.body.delivery, date, (req.body.category)? req.body.category : "no category", userId])
+        .then((result) => {
+            res.redirect('/checkpost');
+        })
+        .catch((error) => {
+            console.log('Error: ' + error)
+        })
+    })
 })
 
 app.post('/login', checNotAuthenticated, passport.authenticate('local', {
@@ -137,11 +162,6 @@ app.post('/login', checNotAuthenticated, passport.authenticate('local', {
 app.post('/register', checNotAuthenticated, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(req.body.password, 8)
-    users = {
-        name: req.body.name,
-        email: req.body.email,
-        password: hashedPassword
-    }
     client.query('INSERT INTO users (name, email, password) VALUES ($1, $2, $3)', [req.body.name, req.body.email, hashedPassword])
     .then((result) => {
         res.redirect('/login');
@@ -152,7 +172,9 @@ app.post('/register', checNotAuthenticated, async (req, res) => {
 })
 
 app.post('/postnew', (req, res) => {
-    res.redirect('/postnew')
+    if(loggedIn) {
+        res.redirect('/postnew')
+    } else res.redirect('/login') 
 })
 
 function checkAuthenticated(req, res, next) {
@@ -163,6 +185,7 @@ function checkAuthenticated(req, res, next) {
 }
 
 app.delete('/logout', (req, res) => {
+    loggedIn = false;
     req.logOut()
     res.redirect('/login')
 }) 
